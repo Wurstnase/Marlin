@@ -4,8 +4,9 @@
 
 import argparse
 
-__author__ = "Ben Gamari <bgamari@gmail.com>"
-__copyright__ = "Copyright 2012, Ben Gamari"
+
+__author__ = "Nico Tonnhofer <tonnhofer@gmail.com>"
+__copyright__ = "Copyright 2015, Nico Tonnhofer"
 __license__ = "GPL"
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -22,28 +23,33 @@ timer_freq = cpu_freq / args.divider
 # print('#include "Marlin.h"')
 # print('')
 
-print('speed_lookuptable_fast = [')
+fileLookupTable = open('lookupTable.py', 'w')
+
+fileLookupTable.write('speed_lookuptable_fast = [\n')
 a = [int(timer_freq / ((i*256)+(args.cpu_freq*2))) for i in range(256)]
 b = [a[i] - a[i+1] for i in range(255)]
 b.append(b[-1])
 for i in range(32):
-    # print('  '),
+    fileLookupTable.write('    ')
     for j in range(8):
-        print('    [%d, %d],' % ((a[8*i+j]), (b[8*i+j]))),
-    print
-print(']')
-print
+        fileLookupTable.write('[%d, %d], ' % ((a[8*i+j]), (b[8*i+j])))
+    fileLookupTable.write('\n')
+fileLookupTable.write(']')
+fileLookupTable.write('\n')
 
-print('speed_lookuptable_slow = [')
+fileLookupTable.write('speed_lookuptable_slow = [\n')
 a = [int(timer_freq / ((i*8)+(args.cpu_freq*2))) for i in range(256)]
 b = [a[i] - a[i+1] for i in range(255)]
 b.append(b[-1])
 for i in range(32):
-    # print("  "),
+    fileLookupTable.write("    ")
     for j in range(8):
-        print('    [%d, %d],' % ((a[8*i+j]), (b[8*i+j])))
-    print
-print(']')
-print
+        fileLookupTable.write('[%d, %d], ' % ((a[8*i+j]), (b[8*i+j])))
+    fileLookupTable.write('\n')
+fileLookupTable.write(']')
+fileLookupTable.write('\n')
+
+print('finished')
+fileLookupTable.close()
 
 # print('#endif')

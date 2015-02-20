@@ -1,5 +1,9 @@
+__author__ = "Nico Tonnhofer <tonnhofer@gmail.com>"
+__copyright__ = "Copyright 2015, Nico Tonnhofer"
+__license__ = "GPL"
+
 from math import ceil, floor, sqrt
-from sam3x_helper import uint32_t, int32_t, uint, int_
+from helper import uint32_t, int32_t, uint, int_
 import config
 
 

@@ -1,11 +1,15 @@
-from sam3x_helper import uint32_t, uint64_t, uint, int32_t, int16_t
-import plannercpp
+__author__ = "Nico Tonnhofer <tonnhofer@gmail.com>"
+__copyright__ = "Copyright 2015, Nico Tonnhofer"
+__license__ = "GPL"
+
+from helper import uint32_t, uint64_t, uint, int32_t, int16_t
+import planner
 from config import HAL_TIMER_RATE, MAX_STEP_FREQUENCY, DOUBLE_FREQUENCY, F_CPU
 import matplotlib.pyplot as plt
-from util import speed_lookuptable_fast, speed_lookuptable_slow
+from lookupTable import speed_lookuptable_fast, speed_lookuptable_slow
 
 
-current_block = plannercpp.calculate_trapezoid_for_block(plannercpp.current_block, 0, 0)  # calculate current_block
+current_block = planner.calculate_trapezoid_for_block(planner.current_block, 0, 0)  # calculate current_block
 
 
 # reset some counter
@@ -55,6 +59,8 @@ def calc_timer(step_rate):
     if step_rate < F_CPU / 500000:
         step_rate = F_CPU / 500000
     step_rate -= (F_CPU / 500000)
+    step_rate = int(step_rate)
+
     if step_rate >= (8*256):
         # print('fast')
         step_element = int(step_rate) >> 8
@@ -62,7 +68,7 @@ def calc_timer(step_rate):
 
         tmp_step_rate = int(step_rate) & 0x00ff
 
-        gain = speed_lookuptable_fast[table_address][0]
+        gain = speed_lookuptable_fast[table_address][1]
 
         timer = MultiU16X8toH16(tmp_step_rate, gain)
         timer = speed_lookuptable_fast[table_address][0] - timer
@@ -84,7 +90,7 @@ def calc_timer(step_rate):
     return int(timer)
 
 
-def calc_new_timer(step_rate):
+def calc_timer_new(step_rate):
     global step_loops
     global first_in_quad, first_in_double
 

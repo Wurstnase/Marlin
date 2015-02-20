@@ -1,8 +1,12 @@
+__author__ = "Nico Tonnhofer <tonnhofer@gmail.com>"
+__copyright__ = "Copyright 2015, Nico Tonnhofer"
+__license__ = "GPL"
+
 MAX_STEP_FREQUENCY = 320000
 DOUBLE_FREQUENCY = 320000
 
 F_CPU = 84000000
-PRESCALER = 2
+PRESCALER = 8
 HAL_TIMER_RATE = F_CPU / PRESCALER
 
 STEPS_PER_MM = 320
