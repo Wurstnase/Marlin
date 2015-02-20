@@ -1,7 +1,8 @@
 from sam3x_helper import uint32_t, uint64_t, uint, int32_t, int16_t
 import plannercpp
-from config import HAL_TIMER_RATE, MAX_STEP_FREQUENCY, DOUBLE_FREQUENCY
+from config import HAL_TIMER_RATE, MAX_STEP_FREQUENCY, DOUBLE_FREQUENCY, F_CPU
 import matplotlib.pyplot as plt
+from util import speed_lookuptable_fast, speed_lookuptable_slow
 
 
 current_block = plannercpp.calculate_trapezoid_for_block(plannercpp.current_block, 0, 0)  # calculate current_block
@@ -18,6 +19,9 @@ MULTI24 = 0
 def MultiU24X24toH16(longIn1, longIn2):
     return uint32_t(uint(((uint64_t(longIn1) >> MULTI24) * longIn2), 64) >> (24-MULTI24))
 
+def MultiU16X8toH16(longIn1, longIn2):
+    return uint32_t(uint((longIn1 * longIn2), 32) >> 16)
+
 # This is a simulation, so I don't need quadstepping for now
 
 first_in_quad = True
@@ -29,7 +33,63 @@ def calc_timer(step_rate):
     global first_in_quad, first_in_double
 
     step_rate = step_rate if step_rate < MAX_STEP_FREQUENCY else MAX_STEP_FREQUENCY
-    step_rate = uint32_t(step_rate)
+    step_rate = uint(step_rate, 16)
+
+    if step_rate > (2 * DOUBLE_FREQUENCY):
+        if first_in_quad:
+            print("quadstepping at {} steps".format(step_rate))
+            first_in_quad = False
+            first_in_double = True
+        step_rate >>= 2
+        step_loops = 4
+    elif step_rate > DOUBLE_FREQUENCY:
+        if first_in_double:
+            print("doublestepping at {} steps".format(step_rate))
+            first_in_quad = True
+            first_in_double = False
+        step_rate >>= 1
+        step_loops = 2
+    else:
+        step_loops = 1
+        
+    if step_rate < F_CPU / 500000:
+        step_rate = F_CPU / 500000
+    step_rate -= (F_CPU / 500000)
+    if step_rate >= (8*256):
+        # print('fast')
+        step_element = int(step_rate) >> 8
+        table_address = step_element >> 1
+
+        tmp_step_rate = int(step_rate) & 0x00ff
+
+        gain = speed_lookuptable_fast[table_address][0]
+
+        timer = MultiU16X8toH16(tmp_step_rate, gain)
+        timer = speed_lookuptable_fast[table_address][0] - timer
+
+    else:
+        # print('slow: {}'.format(step_rate))
+        step_element = 0
+        step_element += (int(step_rate) >> 1) & 0xfffc
+
+        table_address = step_element >> 2
+        timer = speed_lookuptable_slow[table_address - 1][0]
+
+        timer -= (speed_lookuptable_slow[table_address][1] * (uint(step_rate, 8) & 0x0007)) >> 3
+
+
+    # step_rate = step_rate if step_rate > 210 else 210
+    # timer = HAL_TIMER_RATE / step_rate
+    # timer = uint32_t(timer)
+    return int(timer)
+
+
+def calc_new_timer(step_rate):
+    global step_loops
+    global first_in_quad, first_in_double
+
+    step_rate = step_rate if step_rate < MAX_STEP_FREQUENCY else MAX_STEP_FREQUENCY
+    step_rate = uint(step_rate, 16)
 
     if step_rate > (2 * DOUBLE_FREQUENCY):
         if first_in_quad:
@@ -80,7 +140,7 @@ first_else = True
 last_step_rate = 0
 
 
-def ISR_workhorse():
+def ISR_workhorse(my_timer):
     global step_events_completed, HAL_timer_set_count, step_loops, deceleration_time, acceleration_time, acc_step_rate
     global first_acc_until, first_dec_after, first_else
     global dec_after
@@ -105,7 +165,8 @@ def ISR_workhorse():
         if acc_step_rate > current_block.nominal_rate:
             acc_step_rate = current_block.nominal_rate
 
-        timer = calc_timer(acc_step_rate)
+        # timer = calc_timer(acc_step_rate)
+        timer = my_timer(acc_step_rate)
         HAL_timer_set_count = timer
         actual_step_rate = acc_step_rate
 
@@ -131,7 +192,8 @@ def ISR_workhorse():
             step_rate = acc_step_rate - step_rate
             #print(step_rate)
 
-        timer = calc_timer(step_rate)
+        # timer = calc_timer(step_rate)
+        timer = my_timer(step_rate)
         HAL_timer_set_count = timer
         actual_step_rate = step_rate
 
@@ -177,13 +239,15 @@ def run_it(steps):
     list_of_timer_complete.append(HAL_timer_complete)
     # for step_events_completed in range(0, steps-1):
     while step_events_completed < (steps-1):
-        ISR_workhorse()
+        ISR_workhorse(calc_timer)
         list_of_acc_step_rate.append(actual_step_rate)
         list_of_timer_complete.append(HAL_timer_complete)
         step_events_completed += 1*step_loops
         # print(step_events_completed)
-        if last_acc == actual_step_rate and actual_step_rate < 1000:
+        if last_acc == actual_step_rate and actual_step_rate < 150:
+            print("break at: {}".format(step_events_completed))
             break
+        last_acc = actual_step_rate
     print('last: {0}\nspeed: {1}'.format(HAL_timer_complete, actual_step_rate))
 
 
