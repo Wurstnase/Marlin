@@ -106,16 +106,16 @@ def planner_reverse_pass_kernel(previous_block, current_block, next_block):
         current_block.recalculate_flag = True
 
 
-def planner_reverse_pass():
-    global block
-    block_index = block_buffer_head
-
-    if ((block_buffer_head - block_buffer_tail) and (BLOCK_BUFFER_SIZE - 1)) > 3:
-        block_index = (block_buffer_head -3) and (BLOCK_BUFFER_SIZE - 1)
-        block[3] = []
-
-        while block_index not block_buffer_tail:
-            block_index = prev_block_index(block_index)
-            block[2] = block[1]
-            block[1] = block[0]
-            block[0] = block_buffer[block_index]
+# def planner_reverse_pass():
+#     global block
+#     block_index = block_buffer_head
+#
+#     if ((block_buffer_head - block_buffer_tail) and (BLOCK_BUFFER_SIZE - 1)) > 3:
+#         block_index = (block_buffer_head -3) and (BLOCK_BUFFER_SIZE - 1)
+#         block[3] = []
+#
+#         while block_index not block_buffer_tail:
+#             block_index = prev_block_index(block_index)
+#             block[2] = block[1]
+#             block[1] = block[0]
+#             block[0] = block_buffer[block_index]
