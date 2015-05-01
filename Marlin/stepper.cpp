@@ -57,6 +57,7 @@ static unsigned int cleaning_buffer_counter;
 // Counter variables for the Bresenham line tracer
 static long counter_x, counter_y, counter_z, counter_e;
 volatile static unsigned long step_events_completed; // The number of step events executed in the current block
+static long current_step_event_count; // save the current_block->step_event_count
 
 #ifdef ADVANCE
   static long advance_rate, advance, final_advance = 0;
@@ -400,6 +401,8 @@ FORCE_INLINE void trapezoid_generator_reset() {
 // It pops blocks from the block_buffer and executes them by pulsing the stepper pins appropriately.
 ISR(TIMER1_COMPA_vect) {
 
+  OCR1A = 65355; // don't let the interrupt overflow before calculations are done
+
   if(cleaning_buffer_counter)
   {
     current_block = NULL;
@@ -419,7 +422,8 @@ ISR(TIMER1_COMPA_vect) {
     if (current_block) {
       current_block->busy = true;
       trapezoid_generator_reset();
-      counter_x = -(current_block->step_event_count >> 1);
+      current_step_event_count = current_block->step_event_count;
+      counter_x = -(current_step_event_count >> 1);
       counter_y = counter_z = counter_e = counter_x;
       step_events_completed = 0;
 
@@ -475,7 +479,7 @@ ISR(TIMER1_COMPA_vect) {
       if (_ENDSTOP(axis, minmax) && _OLD_ENDSTOP(axis, minmax) && (current_block->steps[_AXIS(AXIS)] > 0)) { \
         endstops_trigsteps[_AXIS(AXIS)] = count_position[_AXIS(AXIS)]; \
         _ENDSTOP_HIT(axis) = true; \
-        step_events_completed = current_block->step_event_count; \
+        step_events_completed = current_step_event_count; \
       } \
       _OLD_ENDSTOP(axis, minmax) = _ENDSTOP(axis, minmax);
 
@@ -562,7 +566,7 @@ ISR(TIMER1_COMPA_vect) {
               endstops_trigsteps[Z_AXIS] = count_position[Z_AXIS];
               endstop_z_hit = true;
               if (!performing_homing || (performing_homing && z_min_both && z2_min_both)) //if not performing home or if both endstops were trigged during homing...
-                step_events_completed = current_block->step_event_count;
+                step_events_completed = current_step_event_count;
             }
             old_z_min_endstop = z_min_endstop;
             old_z2_min_endstop = z2_min_endstop;
@@ -621,7 +625,7 @@ ISR(TIMER1_COMPA_vect) {
              // if (z2_max_both) SERIAL_ECHOLN("z2_max_endstop = true");
 
               if (!performing_homing || (performing_homing && z_max_both && z2_max_both)) //if not performing home or if both endstops were trigged during homing...
-                step_events_completed = current_block->step_event_count;
+                step_events_completed = current_step_event_count;
             }
             old_z_max_endstop = z_max_endstop;
             old_z2_max_endstop = z2_max_endstop;
@@ -662,7 +666,7 @@ ISR(TIMER1_COMPA_vect) {
     #endif //!ADVANCE
 
     // Take multiple steps per interrupt (For high speed moves)
-    for (int8_t i = 0; i < step_loops; i++) {
+    for (int8_t i = 1; i <= step_loops; i++) {
       #ifndef AT90USB
         MSerial.checkRx(); // Check for serial chars.
       #endif
@@ -670,7 +674,7 @@ ISR(TIMER1_COMPA_vect) {
       #ifdef ADVANCE
         counter_e += current_block->steps[E_AXIS];
         if (counter_e > 0) {
-          counter_e -= current_block->step_event_count;
+          counter_e -= current_step_event_count;
           e_steps[current_block->active_extruder] += TEST(out_bits, E_AXIS) ? -1 : 1;
         }
       #endif //ADVANCE
@@ -680,122 +684,104 @@ ISR(TIMER1_COMPA_vect) {
       #define _APPLY_STEP(AXIS) AXIS ##_APPLY_STEP
       #define _INVERT_STEP_PIN(AXIS) INVERT_## AXIS ##_STEP_PIN
 
-      #ifdef CONFIG_STEPPERS_TOSHIBA
-        /**
-         * The Toshiba stepper controller require much longer pulses.
-         * So we 'stage' decompose the pulses between high and low
-         * instead of doing each in turn. The extra tests add enough
-         * lag to allow it work with without needing NOPs
-         */
-        #define STEP_ADD(axis, AXIS) \
-         _COUNTER(axis) += current_block->steps[_AXIS(AXIS)]; \
-         if (_COUNTER(axis) > 0) { _WRITE_STEP(AXIS, HIGH); }
-        STEP_ADD(x,X);
-        STEP_ADD(y,Y);
-        STEP_ADD(z,Z);
-        #ifndef ADVANCE
-          STEP_ADD(e,E);
-        #endif
-
-        #define STEP_IF_COUNTER(axis, AXIS) \
-          if (_COUNTER(axis) > 0) { \
-            _COUNTER(axis) -= current_block->step_event_count; \
-            count_position[_AXIS(AXIS)] += count_direction[_AXIS(AXIS)]; \
-            _WRITE_STEP(AXIS, LOW); \
-          }
-
-        STEP_IF_COUNTER(x, X);
-        STEP_IF_COUNTER(y, Y);
-        STEP_IF_COUNTER(z, Z);
-        #ifndef ADVANCE
-          STEP_IF_COUNTER(e, E);
-        #endif
-
-      #else // !CONFIG_STEPPERS_TOSHIBA
-
-        #define APPLY_MOVEMENT(axis, AXIS) \
-          _COUNTER(axis) += current_block->steps[_AXIS(AXIS)]; \
-          if (_COUNTER(axis) > 0) { \
-            _APPLY_STEP(AXIS)(!_INVERT_STEP_PIN(AXIS),0); \
-            _COUNTER(axis) -= current_block->step_event_count; \
-            count_position[_AXIS(AXIS)] += count_direction[_AXIS(AXIS)]; \
-            _APPLY_STEP(AXIS)(_INVERT_STEP_PIN(AXIS),0); \
-          }
-
-        APPLY_MOVEMENT(x, X);
-        APPLY_MOVEMENT(y, Y);
-        APPLY_MOVEMENT(z, Z);
-        #ifndef ADVANCE
-          APPLY_MOVEMENT(e, E);
-        #endif
-
-      #endif // CONFIG_STEPPERS_TOSHIBA
-      step_events_completed++;
-      if (step_events_completed >= current_block->step_event_count) break;
-    }
-    // Calculate new timer value
-    unsigned short timer;
-    unsigned short step_rate;
-    if (step_events_completed <= (unsigned long)current_block->accelerate_until) {
-
-      MultiU24X32toH16(acc_step_rate, acceleration_time, current_block->acceleration_rate);
-      acc_step_rate += current_block->initial_rate;
-
-      // upper limit
-      if (acc_step_rate > current_block->nominal_rate)
-        acc_step_rate = current_block->nominal_rate;
-
-      // step_rate to timer interval
-      timer = calc_timer(acc_step_rate);
-      OCR1A = timer;
-      acceleration_time += timer;
-      #ifdef ADVANCE
-        for(int8_t i=0; i < step_loops; i++) {
-          advance += advance_rate;
+      #define STEP_ADD(axis, AXIS) \
+        _COUNTER(axis) += current_block->steps[_AXIS(AXIS)]; \
+        if (_COUNTER(axis) > 0) { \
+          _APPLY_STEP(AXIS)(_INVERT_STEP_PIN(AXIS),0); \
+          _COUNTER(axis) -= current_step_event_count; \
+          count_position[_AXIS(AXIS)] += count_direction[_AXIS(AXIS)]; \
         }
-        //if (advance > current_block->advance) advance = current_block->advance;
-        // Do E steps + advance steps
-        e_steps[current_block->active_extruder] += ((advance >>8) - old_advance);
-        old_advance = advance >>8;
-
+      STEP_ADD(x,X);
+      STEP_ADD(y,Y);
+      STEP_ADD(z,Z);
+      #ifndef ADVANCE
+        STEP_ADD(e,E);
       #endif
-    }
-    else if (step_events_completed > (unsigned long)current_block->decelerate_after) {
-      MultiU24X32toH16(step_rate, deceleration_time, current_block->acceleration_rate);
+      
+      if (step_events_completed >= current_step_event_count - 1) i = step_loops; // be sure that we calculate the next timer, when we are in the last current_step but not in the last step_loop
+      
+      if (i >= step_loops) { // last step
+        // Calculate new timer value
+        unsigned short timer;
+        unsigned short step_rate;
+        if (step_events_completed <= (unsigned long)current_block->accelerate_until) {
 
-      if (step_rate > acc_step_rate) { // Check step_rate stays positive
-        step_rate = current_block->final_rate;
-      }
-      else {
-        step_rate = acc_step_rate - step_rate; // Decelerate from aceleration end point.
-      }
+          MultiU24X32toH16(acc_step_rate, acceleration_time, current_block->acceleration_rate);
+          acc_step_rate += current_block->initial_rate;
 
-      // lower limit
-      if (step_rate < current_block->final_rate)
-        step_rate = current_block->final_rate;
+          // upper limit
+          if (acc_step_rate > current_block->nominal_rate)
+            acc_step_rate = current_block->nominal_rate;
 
-      // step_rate to timer interval
-      timer = calc_timer(step_rate);
-      OCR1A = timer;
-      deceleration_time += timer;
-      #ifdef ADVANCE
-        for(int8_t i=0; i < step_loops; i++) {
-          advance -= advance_rate;
+          // step_rate to timer interval
+          timer = calc_timer(acc_step_rate);
+          OCR1A = timer;
+          acceleration_time += timer;
+          #ifdef ADVANCE
+            for(int8_t i=0; i < step_loops; i++) {
+              advance += advance_rate;
+            }
+            //if (advance > current_block->advance) advance = current_block->advance;
+            // Do E steps + advance steps
+            e_steps[current_block->active_extruder] += ((advance >>8) - old_advance);
+            old_advance = advance >>8;
+
+          #endif
         }
-        if (advance < final_advance) advance = final_advance;
-        // Do E steps + advance steps
-        e_steps[current_block->active_extruder] += ((advance >>8) - old_advance);
-        old_advance = advance >>8;
-      #endif //ADVANCE
-    }
-    else {
-      OCR1A = OCR1A_nominal;
-      // ensure we're running at the correct step rate, even if we just came off an acceleration
-      step_loops = step_loops_nominal;
+        else if (step_events_completed > (unsigned long)current_block->decelerate_after) {
+          MultiU24X32toH16(step_rate, deceleration_time, current_block->acceleration_rate);
+
+          if (step_rate > acc_step_rate) { // Check step_rate stays positive
+            step_rate = current_block->final_rate;
+          }
+          else {
+            step_rate = acc_step_rate - step_rate; // Decelerate from aceleration end point.
+          }
+
+          // lower limit
+          if (step_rate < current_block->final_rate)
+            step_rate = current_block->final_rate;
+
+          // step_rate to timer interval
+          timer = calc_timer(step_rate);
+          if (OCR1A + 5 >= timer) OCR1A += 5; // OCR1A will never be over 62500, so we have a little bit space to add 5 securely
+          else OCR1A = timer;
+          deceleration_time += timer;
+          #ifdef ADVANCE
+            for(int8_t i=0; i < step_loops; i++) {
+              advance -= advance_rate;
+            }
+            if (advance < final_advance) advance = final_advance;
+            // Do E steps + advance steps
+            e_steps[current_block->active_extruder] += ((advance >>8) - old_advance);
+            old_advance = advance >>8;
+          #endif //ADVANCE
+        }
+        else {
+          OCR1A = OCR1A_nominal;
+          // ensure we're running at the correct step rate, even if we just came off an acceleration
+          step_loops = step_loops_nominal;
+        }
+      }
+      #ifdef CONFIG_STEPPERS_TOSHIBA
+        else { delayMicroseconds(5); } // MAybe this helps with toshiba multistepping?
+      #endif
+      
+      #define STEP_END(axis, AXIS) \
+        _APPLY_STEP(AXIS)(_INVERT_STEP_PIN(AXIS),0);
+      STEP_END(x, X);
+      STEP_END(y, Y);
+      STEP_END(z, Z);
+      #ifndef ADVANCE
+        STEP_END(e, E);
+      #endif
+
+      step_events_completed++;
+      if (step_events_completed >= current_step_event_count) break;
     }
 
     // If current block is finished, reset pointer
-    if (step_events_completed >= current_block->step_event_count) {
+    if (step_events_completed >= current_step_event_count) {
       current_block = NULL;
       plan_discard_current_block();
     }
