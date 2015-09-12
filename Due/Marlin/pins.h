@@ -47,6 +47,9 @@
 //
 #define RADDS
 
+#define X_GALVO_PIN             DAC0
+#define Y_GALVO_PIN             DAC1
+
 #define X_STEP_PIN         24
 #define X_DIR_PIN          23
 #define X_ENABLE_PIN       26
@@ -60,11 +63,11 @@
 #define Z_DIR_PIN          3
 #define Z_ENABLE_PIN       15
 
-#define X_MIN_PIN          28
+#define X_MIN_PIN          -1
 #define X_MAX_PIN          -1  // 34   //Max endstops default to disabled "-1", set to commented value to enable.
-#define Y_MIN_PIN          30
+#define Y_MIN_PIN          -1
 #define Y_MAX_PIN          -1  // 36
-#define Z_MIN_PIN          32
+#define Z_MIN_PIN          -1
 #define Z_MAX_PIN          -1  // 38
 
 #define E0_STEP_PIN        61
@@ -87,7 +90,6 @@
 
 #define FAN_PIN            9
 
-#define CONTROLLERFAN_PIN  8 //Pin used for the fan to cool controller
 
 #define PS_ON_PIN          40
 
@@ -226,7 +228,6 @@
 
 #define FAN_PIN            -1
 
-#define CONTROLLERFAN_PIN  -1 //Pin used for the fan to cool controller
 
 #define PS_ON_PIN          -1
 

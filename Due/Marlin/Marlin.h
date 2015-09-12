@@ -57,17 +57,11 @@
 
 #include "WString.h"
 
-#ifdef AT90USB
-   #ifdef BTENABLED
-         #define MYSERIAL bt
-   #else
-         #define MYSERIAL Serial
-   #endif // BTENABLED
+#ifdef AVR
+  #define MYSERIAL SerialUSB
 #else
-  #ifdef ARDUINO_ARCH_AVR
-    #define MYSERIAL MSerial
-  #elif defined (ARDUINO_ARCH_SAM)
-    #define MYSERIAL Serial
+  #ifndef MYSERIAL
+  #define MYSERIAL Serial
   #endif
 #endif
 

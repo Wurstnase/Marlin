@@ -48,6 +48,8 @@
 extern bool abort_on_endstop_hit;
 #endif
 
+void report_galvo();
+
 // Initialize and start the stepper motor subsystem
 void st_init();
 

@@ -39,7 +39,6 @@
 #include "ultralcd.h"
 #include "planner.h"
 #include "stepper.h"
-#include "temperature.h"
 #include "motion_control.h"
 #include "cardreader.h"
 #include "watchdog.h"
@@ -497,7 +496,6 @@ void setup()
   // loads data from EEPROM if available else uses defaults (and resets step acceleration rate)
   Config_RetrieveSettings();
 
-  tp_init();    // Initialize temperature loop
   plan_init();  // Initialize planner;
   watchdog_init();
   st_init();    // Initialize stepper, this enables interrupts!
@@ -507,13 +505,13 @@ void setup()
   lcd_init();
   _delay_ms(1000);	// wait 1sec to display the splash screen
 
-  #if defined(CONTROLLERFAN_PIN) && CONTROLLERFAN_PIN > -1
-    SET_OUTPUT(CONTROLLERFAN_PIN); //Set pin used for driver cooling fan
-  #endif
 
   #ifdef DIGIPOT_I2C
     digipot_i2c_init();
   #endif
+  pinMode(DAC1, OUTPUT);    
+  pinMode(DAC0, OUTPUT);
+  analogWriteResolution(12);
 }
 
 
@@ -558,7 +556,7 @@ void loop()
     bufindr = (bufindr + 1)%BUFSIZE;
   }
   //check heater every n milliseconds
-  manage_heater();
+  
   manage_inactivity();
   checkHitEndstops();
   lcd_update();
@@ -1194,7 +1192,7 @@ void process_commands()
       codenum += millis();  // keep track of when we started waiting
       previous_millis_cmd = millis();
       while(millis()  < codenum ){
-        manage_heater();
+        
         manage_inactivity();
         lcd_update();
       }
@@ -1423,176 +1421,12 @@ void process_commands()
       endstops_hit_on_purpose();
       break;
 
-#ifdef ENABLE_AUTO_BED_LEVELING
-    case 29: // G29 Detailed Z-Probe, probes the bed at 3 or more points.
+    case 29: // Reports galvo XY position
         {
-            #if Z_MIN_PIN == -1
-            #error "You must have a Z_MIN endstop in order to enable Auto Bed Leveling feature!!! Z_MIN_PIN must point to a valid hardware pin."
-            #endif
-
-            // Prevent user from running a G29 without first homing in X and Y
-            if (! (axis_known_position[X_AXIS] && axis_known_position[Y_AXIS]) )
-            {
-                LCD_MESSAGEPGM(MSG_POSITION_UNKNOWN);
-                SERIAL_ECHO_START;
-                SERIAL_ECHOLNPGM(MSG_POSITION_UNKNOWN);
-                break; // abort G29, since we don't know where we are
-            }
-
-            st_synchronize();
-            // make sure the bed_level_rotation_matrix is identity or the planner will get it incorectly
-            //vector_3 corrected_position = plan_get_position_mm();
-            //corrected_position.debug("position before G29");
-            plan_bed_level_matrix.set_to_identity();
-            vector_3 uncorrected_position = plan_get_position();
-            //uncorrected_position.debug("position durring G29");
-            current_position[X_AXIS] = uncorrected_position.x;
-            current_position[Y_AXIS] = uncorrected_position.y;
-            current_position[Z_AXIS] = uncorrected_position.z;
-            plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
-            setup_for_endstop_move();
-
-            feedrate = homing_feedrate[Z_AXIS];
-#ifdef AUTO_BED_LEVELING_GRID
-            // probe at the points of a lattice grid
-
-            int xGridSpacing = (RIGHT_PROBE_BED_POSITION - LEFT_PROBE_BED_POSITION) / (AUTO_BED_LEVELING_GRID_POINTS-1);
-            int yGridSpacing = (BACK_PROBE_BED_POSITION - FRONT_PROBE_BED_POSITION) / (AUTO_BED_LEVELING_GRID_POINTS-1);
-
-
-            // solve the plane equation ax + by + d = z
-            // A is the matrix with rows [x y 1] for all the probed points
-            // B is the vector of the Z positions
-            // the normal vector to the plane is formed by the coefficients of the plane equation in the standard form, which is Vx*x+Vy*y+Vz*z+d = 0
-            // so Vx = -a Vy = -b Vz = 1 (we want the vector facing towards positive Z
-
-            // "A" matrix of the linear system of equations
-            double eqnAMatrix[AUTO_BED_LEVELING_GRID_POINTS*AUTO_BED_LEVELING_GRID_POINTS*3];
-            // "B" vector of Z points
-            double eqnBVector[AUTO_BED_LEVELING_GRID_POINTS*AUTO_BED_LEVELING_GRID_POINTS];
-
-
-            int probePointCounter = 0;
-            bool zig = true;
-
-            for (int yProbe=FRONT_PROBE_BED_POSITION; yProbe <= BACK_PROBE_BED_POSITION; yProbe += yGridSpacing)
-            {
-              int xProbe, xInc;
-              if (zig)
-              {
-                xProbe = LEFT_PROBE_BED_POSITION;
-                //xEnd = RIGHT_PROBE_BED_POSITION;
-                xInc = xGridSpacing;
-                zig = false;
-              } else // zag
-              {
-                xProbe = RIGHT_PROBE_BED_POSITION;
-                //xEnd = LEFT_PROBE_BED_POSITION;
-                xInc = -xGridSpacing;
-                zig = true;
-              }
-
-              for (int xCount=0; xCount < AUTO_BED_LEVELING_GRID_POINTS; xCount++)
-              {
-                float z_before;
-                if (probePointCounter == 0)
-                {
-                  // raise before probing
-                  z_before = Z_RAISE_BEFORE_PROBING;
-                } else
-                {
-                  // raise extruder
-                  z_before = current_position[Z_AXIS] + Z_RAISE_BETWEEN_PROBINGS;
-                }
-
-                float measured_z = probe_pt(xProbe, yProbe, z_before);
-
-                eqnBVector[probePointCounter] = measured_z;
-
-                eqnAMatrix[probePointCounter + 0*AUTO_BED_LEVELING_GRID_POINTS*AUTO_BED_LEVELING_GRID_POINTS] = xProbe;
-                eqnAMatrix[probePointCounter + 1*AUTO_BED_LEVELING_GRID_POINTS*AUTO_BED_LEVELING_GRID_POINTS] = yProbe;
-                eqnAMatrix[probePointCounter + 2*AUTO_BED_LEVELING_GRID_POINTS*AUTO_BED_LEVELING_GRID_POINTS] = 1;
-                probePointCounter++;
-                xProbe += xInc;
-              }
-            }
-            clean_up_after_endstop_move();
-
-            // solve lsq problem
-            double *plane_equation_coefficients = qr_solve(AUTO_BED_LEVELING_GRID_POINTS*AUTO_BED_LEVELING_GRID_POINTS, 3, eqnAMatrix, eqnBVector);
-
-            SERIAL_PROTOCOLPGM("Eqn coefficients: a: ");
-            SERIAL_PROTOCOL(plane_equation_coefficients[0]);
-            SERIAL_PROTOCOLPGM(" b: ");
-            SERIAL_PROTOCOL(plane_equation_coefficients[1]);
-            SERIAL_PROTOCOLPGM(" d: ");
-            SERIAL_PROTOCOLLN(plane_equation_coefficients[2]);
-
-
-            set_bed_level_equation_lsq(plane_equation_coefficients);
-
-            free(plane_equation_coefficients);
-
-#else // AUTO_BED_LEVELING_GRID not defined
-
-            // Probe at 3 arbitrary points
-            // probe 1
-            float z_at_pt_1 = probe_pt(ABL_PROBE_PT_1_X, ABL_PROBE_PT_1_Y, Z_RAISE_BEFORE_PROBING);
-
-            // probe 2
-            float z_at_pt_2 = probe_pt(ABL_PROBE_PT_2_X, ABL_PROBE_PT_2_Y, current_position[Z_AXIS] + Z_RAISE_BETWEEN_PROBINGS);
-
-            // probe 3
-            float z_at_pt_3 = probe_pt(ABL_PROBE_PT_3_X, ABL_PROBE_PT_3_Y, current_position[Z_AXIS] + Z_RAISE_BETWEEN_PROBINGS);
-
-            clean_up_after_endstop_move();
-
-            set_bed_level_equation_3pts(z_at_pt_1, z_at_pt_2, z_at_pt_3);
-
-
-#endif // AUTO_BED_LEVELING_GRID
-            st_synchronize();
-
-            // The following code correct the Z height difference from z-probe position and hotend tip position.
-            // The Z height on homing is measured by Z-Probe, but the probe is quite far from the hotend.
-            // When the bed is uneven, this height must be corrected.
-            real_z = float(st_get_position(Z_AXIS))/axis_steps_per_unit[Z_AXIS];  //get the real Z (since the auto bed leveling is already correcting the plane)
-            x_tmp = current_position[X_AXIS] + X_PROBE_OFFSET_FROM_EXTRUDER;
-            y_tmp = current_position[Y_AXIS] + Y_PROBE_OFFSET_FROM_EXTRUDER;
-            z_tmp = current_position[Z_AXIS];
-
-            apply_rotation_xyz(plan_bed_level_matrix, x_tmp, y_tmp, z_tmp);         //Apply the correction sending the probe offset
-            current_position[Z_AXIS] = z_tmp - real_z + current_position[Z_AXIS];   //The difference is added to current position and sent to planner.
-            plan_set_position(current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS], current_position[E_AXIS]);
+        report_galvo();
         }
         break;
 
-    case 30: // G30 Single Z Probe
-        {
-            engage_z_probe(); // Engage Z Servo endstop if available
-
-            st_synchronize();
-            // TODO: make sure the bed_level_rotation_matrix is identity or the planner will get set incorectly
-            setup_for_endstop_move();
-
-            feedrate = homing_feedrate[Z_AXIS];
-
-            run_z_probe();
-            SERIAL_PROTOCOLPGM(MSG_BED);
-            SERIAL_PROTOCOLPGM(" X: ");
-            SERIAL_PROTOCOL(current_position[X_AXIS]);
-            SERIAL_PROTOCOLPGM(" Y: ");
-            SERIAL_PROTOCOL(current_position[Y_AXIS]);
-            SERIAL_PROTOCOLPGM(" Z: ");
-            SERIAL_PROTOCOL(current_position[Z_AXIS]);
-            SERIAL_PROTOCOLPGM("\n");
-
-            clean_up_after_endstop_move();
-
-            retract_z_probe(); // Retract Z Servo endstop if available
-        }
-        break;
-#endif // ENABLE_AUTO_BED_LEVELING
     case 90: // G90
       relative_mode = false;
       break;
@@ -1636,13 +1470,13 @@ void process_commands()
       if (codenum > 0){
         codenum += millis();  // keep track of when we started waiting
         while(millis()  < codenum && !lcd_clicked()){
-          manage_heater();
+          
           manage_inactivity();
           lcd_update();
         }
       }else{
         while(!lcd_clicked()){
-          manage_heater();
+         
           manage_inactivity();
           lcd_update();
         }
@@ -1781,7 +1615,6 @@ void process_commands()
       SERIAL_ECHO_START;
       SERIAL_ECHOLN(time);
       lcd_setstatus(time);
-      autotempShutdown();
       }
       break;
     case 42: //M42 -Change pin status via gcode
@@ -1811,217 +1644,13 @@ void process_commands()
         }
       }
      break;
-    case 104: // M104
-      if(setTargetedHotend(104)){
-        break;
-      }
-      if (code_seen('S')) setTargetHotend(code_value(), tmp_extruder);
-#ifdef DUAL_X_CARRIAGE
-      if (dual_x_carriage_mode == DXC_DUPLICATION_MODE && tmp_extruder == 0)
-        setTargetHotend1(code_value() == 0.0 ? 0.0 : code_value() + duplicate_extruder_temp_offset);
-#endif
-      setWatch();
+      
       break;
     case 112: //  M112 -Emergency Stop
       kill();
       break;
-    case 140: // M140 set bed temp
-      if (code_seen('S')) setTargetBed(code_value());
-      break;
-    case 105 : // M105
-      if(setTargetedHotend(105)){
-        break;
-        }
-      #if defined(TEMP_0_PIN) && TEMP_0_PIN > -1
-        SERIAL_PROTOCOLPGM("ok T:");
-        SERIAL_PROTOCOL_F(degHotend(tmp_extruder),1);
-        SERIAL_PROTOCOLPGM(" /");
-        SERIAL_PROTOCOL_F(degTargetHotend(tmp_extruder),1);
-        #if defined(TEMP_BED_PIN) && TEMP_BED_PIN > -1
-          SERIAL_PROTOCOLPGM(" B:");
-          SERIAL_PROTOCOL_F(degBed(),1);
-          SERIAL_PROTOCOLPGM(" /");
-          SERIAL_PROTOCOL_F(degTargetBed(),1);
-        #endif //TEMP_BED_PIN
-        for (int8_t cur_extruder = 0; cur_extruder < EXTRUDERS; ++cur_extruder) {
-          SERIAL_PROTOCOLPGM(" T");
-          SERIAL_PROTOCOL(cur_extruder);
-          SERIAL_PROTOCOLPGM(":");
-          SERIAL_PROTOCOL_F(degHotend(cur_extruder),1);
-          SERIAL_PROTOCOLPGM(" /");
-          SERIAL_PROTOCOL_F(degTargetHotend(cur_extruder),1);
-        }
-      #else
-        SERIAL_ERROR_START;
-        SERIAL_ERRORLNPGM(MSG_ERR_NO_THERMISTORS);
-      #endif
 
-        SERIAL_PROTOCOLPGM(" @:");
-      #ifdef EXTRUDER_WATTS
-        SERIAL_PROTOCOL((EXTRUDER_WATTS * getHeaterPower(tmp_extruder))/127);
-        SERIAL_PROTOCOLPGM("W");
-      #else
-        SERIAL_PROTOCOL(getHeaterPower(tmp_extruder));
-      #endif
 
-        SERIAL_PROTOCOLPGM(" B@:");
-      #ifdef BED_WATTS
-        SERIAL_PROTOCOL((BED_WATTS * getHeaterPower(-1))/127);
-        SERIAL_PROTOCOLPGM("W");
-      #else
-        SERIAL_PROTOCOL(getHeaterPower(-1));
-      #endif
-
-        #ifdef SHOW_TEMP_ADC_VALUES
-          #if defined(TEMP_BED_PIN) && TEMP_BED_PIN > -1
-            SERIAL_PROTOCOLPGM("    ADC B:");
-            SERIAL_PROTOCOL_F(degBed(),1);
-            SERIAL_PROTOCOLPGM("C->");
-            SERIAL_PROTOCOL_F(rawBedTemp()/OVERSAMPLENR,0);
-          #endif
-          for (int8_t cur_extruder = 0; cur_extruder < EXTRUDERS; ++cur_extruder) {
-            SERIAL_PROTOCOLPGM("  T");
-            SERIAL_PROTOCOL(cur_extruder);
-            SERIAL_PROTOCOLPGM(":");
-            SERIAL_PROTOCOL_F(degHotend(cur_extruder),1);
-            SERIAL_PROTOCOLPGM("C->");
-            SERIAL_PROTOCOL_F(rawHotendTemp(cur_extruder)/OVERSAMPLENR,0);
-          }
-        #endif
-
-        SERIAL_PROTOCOLLN("");
-      return;
-      break;
-    case 109:
-    {// M109 - Wait for extruder heater to reach target.
-      if(setTargetedHotend(109)){
-        break;
-      }
-      LCD_MESSAGEPGM(MSG_HEATING);
-      #ifdef AUTOTEMP
-        autotemp_enabled=false;
-      #endif
-      if (code_seen('S')) {
-        setTargetHotend(code_value(), tmp_extruder);
-#ifdef DUAL_X_CARRIAGE
-        if (dual_x_carriage_mode == DXC_DUPLICATION_MODE && tmp_extruder == 0)
-          setTargetHotend1(code_value() == 0.0 ? 0.0 : code_value() + duplicate_extruder_temp_offset);
-#endif
-        CooldownNoWait = true;
-      } else if (code_seen('R')) {
-        setTargetHotend(code_value(), tmp_extruder);
-#ifdef DUAL_X_CARRIAGE
-        if (dual_x_carriage_mode == DXC_DUPLICATION_MODE && tmp_extruder == 0)
-          setTargetHotend1(code_value() == 0.0 ? 0.0 : code_value() + duplicate_extruder_temp_offset);
-#endif
-        CooldownNoWait = false;
-      }
-      #ifdef AUTOTEMP
-        if (code_seen('S')) autotemp_min=code_value();
-        if (code_seen('B')) autotemp_max=code_value();
-        if (code_seen('F'))
-        {
-          autotemp_factor=code_value();
-          autotemp_enabled=true;
-        }
-      #endif
-
-      setWatch();
-      codenum = millis();
-
-      /* See if we are heating up or cooling down */
-      target_direction = isHeatingHotend(tmp_extruder); // true if heating, false if cooling
-      
-      cancel_heatup = false;
-
-      #ifdef TEMP_RESIDENCY_TIME
-        long residencyStart;
-        residencyStart = -1;
-        /* continue to loop until we have reached the target temp
-          _and_ until TEMP_RESIDENCY_TIME hasn't passed since we reached it */
-        while((!cancel_heatup)&&((residencyStart == -1) ||
-              (residencyStart >= 0 && (((unsigned int) (millis() - residencyStart)) < (TEMP_RESIDENCY_TIME * 1000UL)))) ) {
-      #else
-        while ( target_direction ? (isHeatingHotend(tmp_extruder)) : (isCoolingHotend(tmp_extruder)&&(CooldownNoWait==false)) ) {
-      #endif //TEMP_RESIDENCY_TIME
-          if( (millis() - codenum) > 1000UL )
-          { //Print Temp Reading and remaining time every 1 second while heating up/cooling down
-            SERIAL_PROTOCOLPGM("T:");
-            SERIAL_PROTOCOL_F(degHotend(tmp_extruder),1);
-            SERIAL_PROTOCOLPGM(" E:");
-            SERIAL_PROTOCOL((int)tmp_extruder);
-            #ifdef TEMP_RESIDENCY_TIME
-              SERIAL_PROTOCOLPGM(" W:");
-              if(residencyStart > -1)
-              {
-                 codenum = ((TEMP_RESIDENCY_TIME * 1000UL) - (millis() - residencyStart)) / 1000UL;
-                 SERIAL_PROTOCOLLN( codenum );
-              }
-              else
-              {
-                 SERIAL_PROTOCOLLN( "?" );
-              }
-            #else
-              SERIAL_PROTOCOLLN("");
-            #endif
-            codenum = millis();
-          }
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-        #ifdef TEMP_RESIDENCY_TIME
-            /* start/restart the TEMP_RESIDENCY_TIME timer whenever we reach target temp for the first time
-              or when current temp falls outside the hysteresis after target temp was reached */
-          if ((residencyStart == -1 &&  target_direction && (degHotend(tmp_extruder) >= (degTargetHotend(tmp_extruder)-TEMP_WINDOW))) ||
-              (residencyStart == -1 && !target_direction && (degHotend(tmp_extruder) <= (degTargetHotend(tmp_extruder)+TEMP_WINDOW))) ||
-              (residencyStart > -1 && labs(degHotend(tmp_extruder) - degTargetHotend(tmp_extruder)) > TEMP_HYSTERESIS) )
-          {
-            residencyStart = millis();
-          }
-        #endif //TEMP_RESIDENCY_TIME
-        }
-        LCD_MESSAGEPGM(MSG_HEATING_COMPLETE);
-        starttime=millis();
-        previous_millis_cmd = millis();
-      }
-      break;
-    case 190: // M190 - Wait for bed heater to reach target.
-    #if defined(TEMP_BED_PIN) && TEMP_BED_PIN > -1
-        LCD_MESSAGEPGM(MSG_BED_HEATING);
-        if (code_seen('S')) {
-          setTargetBed(code_value());
-          CooldownNoWait = true;
-        } else if (code_seen('R')) {
-          setTargetBed(code_value());
-          CooldownNoWait = false;
-        }
-        codenum = millis();
-        
-        cancel_heatup = false;
-        target_direction = isHeatingBed(); // true if heating, false if cooling
-
-        while ( (target_direction)&&(!cancel_heatup) ? (isHeatingBed()) : (isCoolingBed()&&(CooldownNoWait==false)) )
-        {
-          if(( millis() - codenum) > 1000 ) //Print Temp Reading every 1 second while heating up.
-          {
-            float tt=degHotend(active_extruder);
-            SERIAL_PROTOCOLPGM("T:");
-            SERIAL_PROTOCOL(tt);
-            SERIAL_PROTOCOLPGM(" E:");
-            SERIAL_PROTOCOL((int)active_extruder);
-            SERIAL_PROTOCOLPGM(" B:");
-            SERIAL_PROTOCOL_F(degBed(),1);
-            SERIAL_PROTOCOLLN("");
-            codenum = millis();
-          }
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-        }
-        LCD_MESSAGEPGM(MSG_BED_DONE);
-        previous_millis_cmd = millis();
-    #endif
-        break;
 
     #if defined(FAN_PIN) && FAN_PIN > -1
       case 106: //M106 Fan On
@@ -2090,7 +1719,6 @@ void process_commands()
       #endif
 
       case 81: // M81 - Turn off Power Supply
-        disable_heater();
         st_synchronize();
         disable_e0();
         disable_e1();
@@ -2497,7 +2125,7 @@ void process_commands()
             }
 
             while(digitalRead(pin_number) != target){
-              manage_heater();
+              
               manage_inactivity();
               lcd_update();
             }
@@ -2581,7 +2209,6 @@ void process_commands()
         if(code_seen('C')) Kc = code_value();
         #endif
 
-        updatePID();
         SERIAL_PROTOCOL(MSG_OK);
         SERIAL_PROTOCOL(" p:");
         SERIAL_PROTOCOL(Kp);
@@ -2605,7 +2232,6 @@ void process_commands()
         if(code_seen('I')) bedKi = scalePID_i(code_value());
         if(code_seen('D')) bedKd = scalePID_d(code_value());
 
-        updatePID();
         SERIAL_PROTOCOL(MSG_OK);
         SERIAL_PROTOCOL(" p:");
         SERIAL_PROTOCOL(bedKp);
@@ -2669,19 +2295,6 @@ void process_commands()
     }
     break;
 	#endif
-    case 303: // M303 PID autotune
-    {
-      float temp = 150.0;
-      int e=0;
-      int c=5;
-      if (code_seen('E')) e=code_value();
-        if (e<0)
-          temp=70;
-      if (code_seen('S')) temp=code_value();
-      if (code_seen('C')) c=code_value();
-      PID_autotune(temp, e, c);
-    }
-    break;
     case 400: // M400 finish all moves
     {
       st_synchronize();
@@ -2851,7 +2464,7 @@ void process_commands()
         uint8_t cnt=0;
         while(!lcd_clicked()){
           cnt++;
-          manage_heater();
+          
           manage_inactivity();
           lcd_update();
           if(cnt==0)
@@ -3342,52 +2955,6 @@ void prepare_arc_move(char isclockwise) {
   previous_millis_cmd = millis();
 }
 
-#if defined(CONTROLLERFAN_PIN) && CONTROLLERFAN_PIN > -1
-
-#if defined(FAN_PIN)
-  #if CONTROLLERFAN_PIN == FAN_PIN
-    #error "You cannot set CONTROLLERFAN_PIN equal to FAN_PIN"
-  #endif
-#endif
-
-unsigned long lastMotor = 0; //Save the time for when a motor was turned on last
-unsigned long lastMotorCheck = 0;
-
-void controllerFan()
-{
-  if ((millis() - lastMotorCheck) >= 2500) //Not a time critical function, so we only check every 2500ms
-  {
-    lastMotorCheck = millis();
-
-    if(!READ(X_ENABLE_PIN) || !READ(Y_ENABLE_PIN) || !READ(Z_ENABLE_PIN) || (soft_pwm_bed > 0)
-    #if EXTRUDERS > 2
-       || !READ(E2_ENABLE_PIN)
-    #endif
-    #if EXTRUDER > 1
-      #if defined(X2_ENABLE_PIN) && X2_ENABLE_PIN > -1
-       || !READ(X2_ENABLE_PIN)
-      #endif
-       || !READ(E1_ENABLE_PIN)
-    #endif
-       || !READ(E0_ENABLE_PIN)) //If any of the drivers are enabled...
-    {
-      lastMotor = millis(); //... set time to NOW so the fan will turn on
-    }
-
-    if ((millis() - lastMotor) >= (CONTROLLERFAN_SECS*1000UL) || lastMotor == 0) //If the last time any driver was enabled, is longer since than CONTROLLERSEC...
-    {
-        digitalWrite(CONTROLLERFAN_PIN, 0);
-        analogWrite(CONTROLLERFAN_PIN, 0);
-    }
-    else
-    {
-        // allows digital or PWM fan output to be used (see M42 handling)
-        digitalWrite(CONTROLLERFAN_PIN, CONTROLLERFAN_SPEED);
-        analogWrite(CONTROLLERFAN_PIN, CONTROLLERFAN_SPEED);
-    }
-  }
-}
-#endif
 
 #ifdef TEMP_STAT_LEDS
 static bool blue_led = false;
@@ -3457,9 +3024,6 @@ void manage_inactivity()
     if( 0 == READ(KILL_PIN) )
       kill();
   #endif
-  #if defined(CONTROLLERFAN_PIN) && CONTROLLERFAN_PIN > -1
-    controllerFan(); //Check if fan should be turned on to cool stepper drivers down
-  #endif
   #ifdef EXTRUDER_RUNOUT_PREVENT
     if( (millis() - previous_millis_cmd) >  EXTRUDER_RUNOUT_SECONDS*1000 )
     if(degHotend(active_extruder)>EXTRUDER_RUNOUT_MINTEMP)
@@ -3498,7 +3062,6 @@ void manage_inactivity()
 void kill()
 {
   cli(); // Stop interrupts
-  disable_heater();
 
   disable_x();
   disable_y();
@@ -3519,7 +3082,7 @@ void kill()
 
 void Stop()
 {
-  disable_heater();
+
   if(Stopped == false) {
     Stopped = true;
     Stopped_gcode_LastN = gcode_LastN; // Save last g_code for restart

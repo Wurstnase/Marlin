@@ -744,26 +744,7 @@ static void lcd_implementation_quick_feedback()
 #endif
 }
 
-#ifdef LCD_HAS_STATUS_INDICATORS
-static void lcd_implementation_update_indicators()
-{
-  #if defined(LCD_I2C_PANELOLU2) || defined(LCD_I2C_VIKI)
-    //set the LEDS - referred to as backlights by the LiquidTWI2 library 
-    static uint8_t ledsprev = 0;
-    uint8_t leds = 0;
-    if (target_temperature_bed > 0) leds |= LED_A;
-    if (target_temperature[0] > 0) leds |= LED_B;
-    if (fanSpeed) leds |= LED_C;
-    #if EXTRUDERS > 1  
-      if (target_temperature[1] > 0) leds |= LED_C;
-    #endif
-    if (leds != ledsprev) {
-      lcd.setBacklight(leds);
-      ledsprev = leds;
-    }
-  #endif
-}
-#endif
+
 
 #ifdef LCD_HAS_SLOW_BUTTONS
 extern uint32_t blocking_enc;

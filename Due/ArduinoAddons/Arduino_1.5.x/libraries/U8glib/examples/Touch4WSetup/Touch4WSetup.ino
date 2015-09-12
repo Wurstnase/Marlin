@@ -223,18 +223,7 @@ void tpd_map_touch_position(struct tpd_struct *d, uint8_t raw)
   }
 }
 
-void tp_Init(uint8_t width, uint8_t height)
-{
-  tp.x.start = X_START;
-  tp.x.end = X_END;
-  tp.x.range = width-1;
-  
-  tp.y.start = Y_START;
-  tp.y.end = Y_END;
-  tp.y.range = height-1;
-  
-  tp.is_update = 1;
-}
+
 
 void setTouchRawValues(uint8_t x, uint8_t y)
 {
@@ -305,7 +294,6 @@ void setup(void) {
   u8g.setCursorFont(u8g_font_cursor);
   u8g.setCursorStyle(32);
   
-  tp_Init(u8g.getWidth(), u8g.getHeight());
   
   tp.is_update = 1;
 }

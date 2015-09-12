@@ -24,7 +24,6 @@
 #include "Marlin.h"
 #include "stepper.h"
 #include "planner.h"
-#include "temperature.h"
 #include "ultralcd.h"
 #include "language.h"
 #include "cardreader.h"
@@ -53,6 +52,8 @@ static long counter_x,       // Counter variables for the bresenham line tracer
             counter_y,
             counter_z,
             counter_e;
+long int x_val=0, y_val=0;
+int x_dir=0, y_dir=0;
 volatile static unsigned long step_events_completed; // The number of step events executed in the current block
 #ifdef ADVANCE
   static long advance_rate, advance, final_advance = 0;
@@ -93,6 +94,60 @@ volatile signed char count_direction[NUM_AXIS] = { 1, 1, 1, 1};
 //===========================================================================
 //=============================functions         ============================
 //===========================================================================
+/*
+#define STEP_GALVO(AXIS)\
+    if(count_direction[_AXIS(AXIS)])\
+    {\
+      DAC_VALUE(AXIS)+=1;\
+      if(DAC_VALUE(AXIS)>=4096)\
+        DAC_VALUE(AXIS)=4096;\
+    }\
+        if(!count_direction[_AXIS(AXIS)])\
+    {\
+      DAC_VALUE(AXIS)-=1;\
+      if(DAC_VALUE(AXIS)<=0)\
+         DAC_VALUE(AXIS)=0;\
+     }\
+ analogWrite(GALVO_PIN(AXIS),DAC_VALUE(AXIS));
+*/
+ void step_x_galvo()
+ {
+  if(x_dir==1)
+    x_val+=1;
+  if(x_dir==(-1))
+    x_val-=1;
+  if(x_val>=4095)
+    x_val=4095;
+  else if(x_val<=0)
+    x_val=0;
+  analogWrite(X_GALVO_PIN,x_val);
+
+ }
+
+ void step_y_galvo()
+ {
+  if(y_dir==1)
+    y_val+=1;
+  if(y_dir==(-1))
+    y_val-=1;
+  if(y_val>=4095)
+    y_val=4095;
+  else if(y_val<=0)
+    y_val=0;
+  analogWrite(Y_GALVO_PIN,y_val);
+
+
+ }
+
+void report_galvo()
+
+{   
+        SERIAL_ECHO_START;
+        SERIAL_ECHO("X Value");
+        SERIAL_ECHO(x_val);
+        SERIAL_ECHO("Y Value");
+        SERIAL_ECHO(y_val);
+}
 
 #define CHECK_ENDSTOPS  if(check_endstops)
 
@@ -210,9 +265,7 @@ void checkHitEndstops()
      card.sdprinting = false;
      card.closefile();
      quickStop();
-     setTargetHotend0(0);
-     setTargetHotend1(0);
-     setTargetHotend2(0);
+
    }
 #endif
  }
@@ -374,55 +427,25 @@ HAL_STEP_TIMER_ISR
 
     // Set the direction bits (X_AXIS=A_AXIS and Y_AXIS=B_AXIS for COREXY)
     if((out_bits & (1<<X_AXIS))!=0){
-      #ifdef DUAL_X_CARRIAGE
-        if (extruder_duplication_enabled){
-          WRITE(X_DIR_PIN, INVERT_X_DIR);
-          WRITE(X2_DIR_PIN, INVERT_X_DIR);
-        }
-        else{
-          if (current_block->active_extruder != 0)
-            WRITE(X2_DIR_PIN, INVERT_X_DIR);
-          else
-            WRITE(X_DIR_PIN, INVERT_X_DIR);
-        }
-      #else
-        WRITE(X_DIR_PIN, INVERT_X_DIR);
-      #endif        
+
+       // WRITE(X_DIR_PIN, INVERT_X_DIR);   
+       x_dir=-1;   
       count_direction[X_AXIS]=-1;
     }
     else{
-      #ifdef DUAL_X_CARRIAGE
-        if (extruder_duplication_enabled){
-          WRITE(X_DIR_PIN, !INVERT_X_DIR);
-          WRITE(X2_DIR_PIN, !INVERT_X_DIR);
-        }
-        else{
-          if (current_block->active_extruder != 0)
-            WRITE(X2_DIR_PIN, !INVERT_X_DIR);
-          else
-            WRITE(X_DIR_PIN, !INVERT_X_DIR);
-        }
-      #else
-        WRITE(X_DIR_PIN, !INVERT_X_DIR);
-      #endif        
-      count_direction[X_AXIS]=1;
+
+        //WRITE(X_DIR_PIN, !INVERT_X_DIR);
+        x_dir=1 ; 
+        count_direction[X_AXIS]=1;                     //SETTING DIRECTION SLA
     }
     if((out_bits & (1<<Y_AXIS))!=0){
-      WRITE(Y_DIR_PIN, INVERT_Y_DIR);
-	  
-	  #ifdef Y_DUAL_STEPPER_DRIVERS
-	    WRITE(Y2_DIR_PIN, !(INVERT_Y_DIR == INVERT_Y2_VS_Y_DIR));
-	  #endif
-	  
+      //WRITE(Y_DIR_PIN, INVERT_Y_DIR);
+	  y_dir=-1;
       count_direction[Y_AXIS]=-1;
     }
     else{
       WRITE(Y_DIR_PIN, !INVERT_Y_DIR);
-	  
-	  #ifdef Y_DUAL_STEPPER_DRIVERS
-	    WRITE(Y2_DIR_PIN, (INVERT_Y_DIR == INVERT_Y2_VS_Y_DIR));
-	  #endif
-	  
+	   y_dir=1;
       count_direction[Y_AXIS]=1;
     }
 
@@ -570,85 +593,46 @@ HAL_STEP_TIMER_ISR
       #endif
 	  #endif
 
-      #ifdef ADVANCE
-      counter_e += current_block->steps_e;
-      if (counter_e > 0) {
-        counter_e -= current_block->step_event_count;
-        if ((out_bits & (1<<E_AXIS)) != 0) { // - direction
-          e_steps[current_block->active_extruder]--;
-        }
-        else {
-          e_steps[current_block->active_extruder]++;
-        }
-      }
-      #endif //ADVANCE
 
         counter_x += current_block->steps_x;
         if (counter_x > 0) {
-        #ifdef DUAL_X_CARRIAGE
-          if (extruder_duplication_enabled){
-            WRITE(X_STEP_PIN, !INVERT_X_STEP_PIN);
-            WRITE(X2_STEP_PIN, !INVERT_X_STEP_PIN);
-          }
-          else {
-            if (current_block->active_extruder != 0)
-              WRITE(X2_STEP_PIN, !INVERT_X_STEP_PIN);
-            else
-              WRITE(X_STEP_PIN, !INVERT_X_STEP_PIN);
-          }
-        #else
-          WRITE(X_STEP_PIN, !INVERT_X_STEP_PIN);
-        #endif        
+
+          //WRITE(X_STEP_PIN, !INVERT_X_STEP_PIN)
+          //STEP_GALVO(X);
+          step_x_galvo();
           counter_x -= current_block->step_event_count;
           count_position[X_AXIS]+=count_direction[X_AXIS];   
-        #ifdef DUAL_X_CARRIAGE
-          if (extruder_duplication_enabled){
-            WRITE(X_STEP_PIN, INVERT_X_STEP_PIN);
-            WRITE(X2_STEP_PIN, INVERT_X_STEP_PIN);
-          }
-          else {
-            if (current_block->active_extruder != 0)
-              WRITE(X2_STEP_PIN, INVERT_X_STEP_PIN);
-            else
-              WRITE(X_STEP_PIN, INVERT_X_STEP_PIN);
-          }
-        #else
-          WRITE(X_STEP_PIN, INVERT_X_STEP_PIN);
-        #endif
+
+         // WRITE(X_STEP_PIN, INVERT_X_STEP_PIN);
+
         }
 
         counter_y += current_block->steps_y;
         if (counter_y > 0) {
-          WRITE(Y_STEP_PIN, !INVERT_Y_STEP_PIN);
-		  
-		  #ifdef Y_DUAL_STEPPER_DRIVERS
-			WRITE(Y2_STEP_PIN, !INVERT_Y_STEP_PIN);
-		  #endif
-		  
-          counter_y -= current_block->step_event_count;
+
+        //  WRITE(Y_STEP_PIN, !INVERT_Y_STEP_PIN);
+		    //STEP_GALVO(Y);
+          step_y_galvo();
+          counter_y -= current_block->step_event_count;             //stap sla
           count_position[Y_AXIS]+=count_direction[Y_AXIS];
-          WRITE(Y_STEP_PIN, INVERT_Y_STEP_PIN);
+
+       //  WRITE(Y_STEP_PIN, INVERT_Y_STEP_PIN);
 		  
-		  #ifdef Y_DUAL_STEPPER_DRIVERS
-			WRITE(Y2_STEP_PIN, INVERT_Y_STEP_PIN);
-		  #endif
+
         }
 
       counter_z += current_block->steps_z;
       if (counter_z > 0) {
         WRITE(Z_STEP_PIN, !INVERT_Z_STEP_PIN);
         
-        #ifdef Z_DUAL_STEPPER_DRIVERS
-          WRITE(Z2_STEP_PIN, !INVERT_Z_STEP_PIN);
-        #endif
+
+
 
         counter_z -= current_block->step_event_count;
         count_position[Z_AXIS]+=count_direction[Z_AXIS];
+
         WRITE(Z_STEP_PIN, INVERT_Z_STEP_PIN);
-        
-        #ifdef Z_DUAL_STEPPER_DRIVERS
-          WRITE(Z2_STEP_PIN, INVERT_Z_STEP_PIN);
-        #endif
+
       }
 
       #ifndef ADVANCE
@@ -732,62 +716,6 @@ HAL_STEP_TIMER_ISR
   }
 }
 
-#ifdef ADVANCE
-  unsigned char old_OCR0A;
-  // Timer interrupt for E. e_steps is set in the main routine;
-  // Timer 0 is shared with millies
-  ISR(TIMER0_COMPA_vect)
-  {
-    old_OCR0A += 52; // ~10kHz interrupt (250000 / 26 = 9615kHz)
-    OCR0A = old_OCR0A;
-    // Set E direction (Depends on E direction + advance)
-    for(unsigned char i=0; i<4;i++) {
-      if (e_steps[0] != 0) {
-        WRITE(E0_STEP_PIN, INVERT_E_STEP_PIN);
-        if (e_steps[0] < 0) {
-          WRITE(E0_DIR_PIN, INVERT_E0_DIR);
-          e_steps[0]++;
-          WRITE(E0_STEP_PIN, !INVERT_E_STEP_PIN);
-        }
-        else if (e_steps[0] > 0) {
-          WRITE(E0_DIR_PIN, !INVERT_E0_DIR);
-          e_steps[0]--;
-          WRITE(E0_STEP_PIN, !INVERT_E_STEP_PIN);
-        }
-      }
- #if EXTRUDERS > 1
-      if (e_steps[1] != 0) {
-        WRITE(E1_STEP_PIN, INVERT_E_STEP_PIN);
-        if (e_steps[1] < 0) {
-          WRITE(E1_DIR_PIN, INVERT_E1_DIR);
-          e_steps[1]++;
-          WRITE(E1_STEP_PIN, !INVERT_E_STEP_PIN);
-        }
-        else if (e_steps[1] > 0) {
-          WRITE(E1_DIR_PIN, !INVERT_E1_DIR);
-          e_steps[1]--;
-          WRITE(E1_STEP_PIN, !INVERT_E_STEP_PIN);
-        }
-      }
- #endif
- #if EXTRUDERS > 2
-      if (e_steps[2] != 0) {
-        WRITE(E2_STEP_PIN, INVERT_E_STEP_PIN);
-        if (e_steps[2] < 0) {
-          WRITE(E2_DIR_PIN, INVERT_E2_DIR);
-          e_steps[2]++;
-          WRITE(E2_STEP_PIN, !INVERT_E_STEP_PIN);
-        }
-        else if (e_steps[2] > 0) {
-          WRITE(E2_DIR_PIN, !INVERT_E2_DIR);
-          e_steps[2]--;
-          WRITE(E2_STEP_PIN, !INVERT_E_STEP_PIN);
-        }
-      }
- #endif
-    }
-  }
-#endif // ADVANCE
 
 void st_init()
 {
@@ -1004,7 +932,6 @@ void st_init()
 void st_synchronize()
 {
     while( blocks_queued()) {
-    manage_heater();
     manage_inactivity();
     lcd_update();
   }

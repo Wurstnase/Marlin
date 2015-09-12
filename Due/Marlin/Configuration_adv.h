@@ -1,7 +1,7 @@
 #ifndef CONFIGURATION_ADV_H
 #define CONFIGURATION_ADV_H
 
-//===========================================================================
+/*//===========================================================================
 //=============================Thermal Settings  ============================
 //===========================================================================
 
@@ -81,7 +81,7 @@
 #define EXTRUDER_AUTO_FAN_TEMPERATURE 50
 #define EXTRUDER_AUTO_FAN_SPEED   255  // == full speed
 
-
+*/
 //===========================================================================
 //=============================Mechanical Settings===========================
 //===========================================================================
@@ -245,7 +245,7 @@
 #endif
 
 // minimum time in microseconds that a movement needs to take if the buffer is emptied.
-#define DEFAULT_MINSEGMENTTIME        20000
+#define DEFAULT_MINSEGMENTTIME        20000 //was 20000
 
 // If defined the movements slow down when the look ahead buffer is only half full
 #define SLOWDOWN
@@ -258,7 +258,7 @@
 // Minimum planner junction speed. Sets the default minimum speed the planner plans for at the end
 // of the buffer and all stops. This should not be much greater than zero and should only be changed
 // if unwanted behavior is observed on a user's machine when running at very slow speeds.
-#define MINIMUM_PLANNER_SPEED 0.05// (mm/sec)
+#define MINIMUM_PLANNER_SPEED 0.01// (mm/sec)   //was 0.05 sla
 
 // MS1 MS2 Stepper Driver Microstepping mode table
 #define MICROSTEP1 LOW,LOW

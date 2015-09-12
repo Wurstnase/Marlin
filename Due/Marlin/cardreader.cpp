@@ -2,7 +2,6 @@
 #include "cardreader.h"
 #include "ultralcd.h"
 #include "stepper.h"
-#include "temperature.h"
 #include "language.h"
 
 #ifdef SDSUPPORT
@@ -632,7 +631,6 @@ void CardReader::printingHasFinished()
           //finishAndDisableSteppers();
           enquecommand_P(PSTR(SD_FINISHED_RELEASECOMMAND));
       }
-      autotempShutdown();
     }
 }
 #endif //SDSUPPORT

@@ -1,6 +1,5 @@
 #include "Marlin.h"
 #include "planner.h"
-#include "temperature.h"
 #include "ultralcd.h"
 #include "ConfigurationStore.h"
 
@@ -252,8 +251,7 @@ void Config_RetrieveSettings()
         #endif
         EEPROM_READ_VAR(i,lcd_contrast);
 
-		// Call updatePID (similar to when we have processed M301)
-		updatePID();
+
         SERIAL_ECHO_START;
         SERIAL_ECHOLNPGM("Stored settings retrieved");
     }
@@ -317,8 +315,6 @@ void Config_ResetDefault()
     Ki = scalePID_i(DEFAULT_Ki);
     Kd = scalePID_d(DEFAULT_Kd);
     
-    // call updatePID (similar to when we have processed M301)
-    updatePID();
     
 #ifdef PID_ADD_EXTRUSION_RATE
     Kc = DEFAULT_Kc;
